@@ -18,27 +18,30 @@ dieSyntax() { echo "$kTHIS_NAME: ARGUMENT ERROR: ${1:-"Invalid argument(s) speci
 # DESCRIPTION
 #   Opens the specified URL in the system's default browser.
 openUrl() {
-  local url=$1 platform=$(uname) cmd=()
+(
+  url=$1 platform=$(uname) cmd=
   case $platform in
-    'Darwin') # OSX
-      cmd=( open "$url" )
+    ('Darwin') # OSX
+      cmd=open "$url"
       ;;
-    'CYGWIN_'*) # Cygwin on Windows; must call cmd.exe with its `start` builtin
-      cmd=( cmd.exe /c start '' "$url " )  # !! Note the required trailing space.
+    ('CYGWIN_'*) # Cygwin on Windows; must call cmd.exe with its `start` builtin
+      cmd=cmd.exe /c start '' "$url "  # !! Note the required trailing space.
       ;;
-    'MINGW32_'*) # MSYS or Git Bash on Windows; they come with a Unix `start` binary
-      cmd=( start '' "$url" )
+    ('MINGW32_'*) # MSYS or Git Bash on Windows; they come with a Unix `start` binary
+      cmd=start '' "$url" 
       ;;
-    *) # Otherwise, assume a Freedesktop-compliant OS, which includes many Linux distros, PC-BSD, OpenSolaris, ...
-      cmd=( xdg-open "$url" )
+    (*) # Otherwise, assume a Freedesktop-compliant OS, which includes many Linux distros, PC-BSD, OpenSolaris, ...
+      cmd=xdg-open "$url"
       ;; 
   esac
-  "${cmd[@]}" || { echo "Cannot locate or failed to open default browser; please go to '$url' manually." >&2; return 1; }
+  eval "$cmd[@]" || { echo "Cannot locate or failed to open default browser; please go to '$url' manually." >&2; exit 1; }
+)
 }
 
 # Prints the embedded Markdown-formatted man-page source to stdout.
 printManPageSource() {
-  sed -n -e $'/^: <<\'EOF_MAN_PAGE\'/,/^EOF_MAN_PAGE/ { s///; t\np;}' "$BASH_SOURCE"
+  LF=$(printf \\\012_); LF=${LF%_}
+  sed -n -e '/^: <<'\''EOF_MAN_PAGE'\''/,/^EOF_MAN_PAGE/ { s///; t'"$LF"'p;}' "$BASH_SOURCE"
 }
 
 # Opens the man page, if installed; otherwise, tries to display the embedded Markdown-formatted man-page source; if all else fails: tries to display the man page online.
@@ -47,13 +50,13 @@ openManPage() {
   if ! man 1 "$kTHIS_NAME" 2>/dev/null; then
     # 2nd attempt: if present, display the embedded Markdown-formatted man-page source
     embeddedText=$(printManPageSource)
-    if [[ -n $embeddedText ]]; then
+    case "$embeddedText" in (?*)
       pager='more'
       command -v less &>/dev/null && pager='less' # see if the non-standard `less` is available, because it's preferable to the POSIX utility `more`
       printf '%s\n' "$embeddedText" | "$pager"
-    else # 3rd attempt: open the the man page on the utility's website
+    ;;(*) # 3rd attempt: open the the man page on the utility's website
       openUrl "${kTHIS_HOMEPAGE}/doc/${kTHIS_NAME}.md"
-    fi
+    ;;esac
   fi  
 }
 
@@ -62,36 +65,36 @@ printUsage() {
   local embeddedText
   # Extract usage information from the SYNOPSIS chapter of the embedded Markdown-formatted man-page source.
   embeddedText=$(sed -n -e $'/^: <<\'EOF_MAN_PAGE\'/,/^EOF_MAN_PAGE/!d; /^## SYNOPSIS$/,/^#/{ s///; t\np; }' "$BASH_SOURCE")
-  if [[ -n $embeddedText ]]; then
+  case "$embeddedText" in (?*)
     # Print extracted synopsis chapter - remove backticks for uncluttered display.
     printf '%s\n\n' "$embeddedText" | tr -d '`'
-  else # No SYNOPIS chapter found; fall back to displaying the man page.
+  ;;(*) # No SYNOPIS chapter found; fall back to displaying the man page.
     echo "WARNING: usage information not found; opening man page instead." >&2
     openManPage
-  fi
+  ;;esac
 }
 
 # --- End: STANDARD HELPER FUNCTIONS
 
 # ---  PROCESS STANDARD, OUTPUT-INFO-THEN-EXIT OPTIONS.
 case $1 in
-  --version)
+  (--version)
     # Output version number and exit, if requested.
     echo "$kTHIS_NAME $kTHIS_VERSION"$'\nFor license information and more, visit '"$kTHIS_HOMEPAGE"; exit 0
     ;;
-  -h|--help)
+  (-h|--help)
     # Print usage information and exit.
     printUsage; exit
     ;;
-  --man)
+  (--man)
     # Display the manual page and exit, falling back to printing the embedded man-page source.
     openManPage; exit
     ;;
-  --man-source) # private option, used by `make update-man`
+  (--man-source) # private option, used by `make update-man`
     # Print raw, embedded Markdown-formatted man-page source and exit
     printManPageSource; exit
     ;;
-  --home)
+  (--home)
     # Open the home page and exit.
     openUrl "$kTHIS_HOMEPAGE"; exit
     ;;
@@ -130,29 +133,33 @@ dieSyntax() {
 #   (e.g., [[ -t 1  ]] || kNO_COLOR=1)
 colorOutput() {
   local pre="\033[${1}m" post='\033[0m'
-  (( kNO_COLOR )) && { pre= post=; }
+  case kNO_COLOR in (0) :;; (*) { pre= post=; }; esac
   shift   
-  if (( $# )); then
+  case $# in ([1-9]*)
     printf "${pre}%s${post}" "$@"
-  else # stdin input
+  ;;(0) # stdin input
     printf "$pre"
     cat
     printf "$post"
-  fi  
+  ;;esac 
 }
 
 # SYNOPSIS
 #   colorCodeOutput exitCode  [text ...]
 # Colors text based on the specified exit code: if 0, green; otherwise, read.
 colorCodeOutput() {
-  (( $1 == 0 )) && green "${@:2}" || red "${@:2}"
+  case $1 in (0) green "${@:2}";; (*) red "${@:2}"; esac
 }
 
 # SYNOPSIS
 #  ... | colorIfFailed exitCode
 # Prints input red, if EXITCODE != 0; as is, otherwise.
 colorIfFailed() {
-  (( $1 == 0 )) && { (( $# > 1 )) && echo "$@" || cat; } || red "${@:2}"
+  case $1 in (0)
+    case $# in ([01]) cat
+    ;; echo "$@";; esac
+  ;;(*) red "${@:2}"
+  ;;esac
 }
 
 green() {
@@ -174,7 +181,7 @@ underlineBlue() {
 
 statusMark() {
   local mark=$(red '✗')
-  (( $1 == 0 )) && mark=$(green '✓')
+  case $1 in (0) mark=$(green '✓');; esac
   printf '%s' "$mark"
 }
 
@@ -255,30 +262,30 @@ while getopts :w:l:p:qQc:si opt; do  # $opt will receive the option *letters* on
   [[ $opt == '?' ]] && dieSyntax "ARGUMENT ERROR: Unknown option: -$OPTARG. To pass options through to the target shells, pass them via -p."
   [[ $opt == ':' ]] && dieSyntax "Option -$OPTARG is missing its argument."
   case $opt in
-    w|l)  # !! -l is for backward compatibility - switched to -w to avoid confusion with native shell option -l (run as login shell)
+    (w|l)  # !! -l is for backward compatibility - switched to -w to avoid confusion with native shell option -l (run as login shell)
       shellList=$OPTARG
       ;;
-    q)
+    (q)
       quietStdout=1
       ;;
-    Q)
+    (Q)
       quietAll=1
       ;;
-    c) # note that, curiously, all shells require the argument to -c be specified as a SEPARATE argument, violating the POSIX requirement that mandatory option-arguments *also* be accepted as directly-attached values.
+    (c) # note that, curiously, all shells require the argument to -c be specified as a SEPARATE argument, violating the POSIX requirement that mandatory option-arguments *also* be accepted as directly-attached values.
        # possible rationale: additional non-option arguments can follow, representing the positional parameters that the command string will see
       isCmdStr=1
       cmdStr=$OPTARG
       ;;
-    i)
+    (i)
       interactive=1
       ;;
-    s)
+    (s)
       fromStdin=1
       ;;
-    p)
+    (p)
       extraPassThruOpts=$OPTARG
       ;;
-    *)
+    (*)
       dieSyntax "DESIGN ERROR: Unhandled option: $opt"
       ;;
   esac
